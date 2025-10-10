@@ -1,0 +1,18 @@
+# requirements.txt
+
+# Core API
+fastapi>=0.110,<1.0
+uvicorn>=0.22,<1.0
+
+# LLM / RAG stack
+llama-index>=0.10,<1.0
+chromadb>=0.5,<1.0
+tiktoken>=0.7,<1.0
+
+# Environment & Utils
+python-dotenv>=1.0,<2.0
+pydantic>=2.0,<3.0
+requests>=2.30,<3.0
+
+#openai>=1.0,<2.0
+#huggingface_hub>=0.23,<1.0
