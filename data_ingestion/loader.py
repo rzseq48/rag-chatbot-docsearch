@@ -1,6 +1,5 @@
+# data_ingestion/loader.py
 """
-data_ingestion/loader.py
-
 Purpose
 -------
 High-level loader orchestrator for rag-chatbot-docsearch.
@@ -23,7 +22,6 @@ Design guidance:
 - Cache expensive steps (rendering, OCR results) in your cache_dir.
 - Persist per-file status/manifest in a small sqlite/jsonl store (StatusStore below is a placeholder).
 """
-
 from pathlib import Path
 from typing import Iterator, Dict, Optional, Any, Iterable, Union, List, Tuple
 import tempfile
@@ -377,7 +375,7 @@ class PdfHandler(Handler):
     """
     PDF handler (text-first strategy).
     Implementation plan:
-    - inspect(): try to use a light-weight PDF library to return page_count and whether pages have embedded text
+    - inspect(): try to use a light-weight PDF library to return page_count and whether pages have embedded_text
     - extract(): iterate pages:
         * If embedded text present for page -> yield raw_text
         * Else -> yield image_bytes (rendered page) with meta indicating OCR fallback needed
@@ -392,10 +390,6 @@ class PdfHandler(Handler):
 
     def extract(self, fd: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
         # TODO: implement text-first extraction and yield page dicts
-        # Example yields:
-        # yield {"page_number": 1, "raw_text": "some text", "image_bytes": None, "meta": {"engine": "pypdf"}}
-        # or if page empty:
-        # yield {"page_number": 2, "raw_text": None, "image_bytes": b"...", "meta": {"rendered": True}}
         return
         yield  # make it a generator (no-op)
 
@@ -727,7 +721,7 @@ class Loader:
     # end discover
 
     # -----------------------
-    # remaining orchestrator methods (skeletons with rich comments)
+    # remaining orchestrator methods (implemented)
     # -----------------------
 
     def choose_handler(self, fd: Dict[str, Any]) -> Handler:
@@ -774,40 +768,130 @@ class Loader:
             return f"{file_hash}::p{page_number}::c{chunk_index}"
         return f"{file_hash}::p{page_number}"
 
-    def process_file(self, fd: Dict[str, Any], *, preview: bool = False, ocr_enabled: bool = True, force: bool = False) -> Iterator[Dict[str, Any]]:
+    def _page_hash(self, page_number: int, raw_text: Optional[str], image_bytes: Optional[bytes]) -> str:
+        """
+        Compute a stable hash for a page using text if available, otherwise image bytes.
+        """
+        h = hashlib.sha256()
+        if raw_text is not None:
+            h.update(raw_text.encode("utf-8", errors="replace"))
+        elif image_bytes is not None:
+            h.update(image_bytes)
+        h.update(str(page_number).encode())
+        return h.hexdigest()
+
+    def process_file(self, fd: Dict[str, Any], *, preview: bool = False, ocr_enabled: bool = True, force: bool = False, preview_limit: int = 2) -> Iterator[Dict[str, Any]]:
         """
         Orchestrate extraction for a single FileDescriptor and yield Document dicts.
 
-        High-level plan:
+        Behaviour summary:
         - Check status_store for existing processed state: skip unless force.
-        - Call choose_handler(fd) to get a handler instance.
-        - Call handler.inspect(fd) to get file-level metadata.
+        - Choose handler and call inspect(fd).
         - Iterate handler.extract(fd):
-            - For each page: compute page_hash
-            - If page has raw_text: create Document with raw_text and metadata, yield
-            - If page has image_bytes and ocr_enabled:
-                * check OCR cache (not implemented here)
-                * call self.ocr_client.process(image_bytes) if available
-                * yield Document with ocr text + ocr meta
-            - If page has image_bytes and OCR disabled: yield Document with image_bytes and metadata (cleaner or later stage may decide)
+            - compute page_hash
+            - create Document dict using document_template
+            - if page has image_bytes and ocr_enabled and ocr_client present: call OCR and attach
         - Update status_store.mark_processed on success or mark_failed on exceptions.
-        - If preview True: stop after N pages (implement preview count outside this method).
-        - On exceptions, yield nothing and mark file failed with reason.
-
-        Implementation is left as skeleton so you can implement carefully and test each step.
+        - If preview True: stop after preview_limit pages and do not mark processed.
         """
-        # TODO: check status store (skip if already processed and not force).
-        # TODO: choose handler and call inspect. Log results.
-        # TODO: iterate handler.extract and produce Documents:
-        #   - compute page_hash (sha256 of raw_text or image bytes + page_number)
-        #   - build metadata dictionary using document_template()['metadata']
-        #   - set extraction_engine in metadata (e.g., 'pypdf' or 'pymupdf')
-        #   - if OCR needed and ocr_client is present: call ocr_client.process and attach results
-        #   - assign stable id using _make_document_id
-        #   - yield document dicts
-        # TODO: update status_store at end (mark_processed) with summary (pages_count, bytes, runtime)
-        # NOTE: keep this method streaming: do not accumulate all pages in memory.
-        raise NotImplementedError("process_file orchestration must be implemented by developer")
+        file_hash = fd.get("quick_hash")
+        if not file_hash:
+            file_hash = hashlib.sha256(str(fd.get("source")).encode()).hexdigest()
+
+        # quick idempotency check
+        try:
+            status = self.status_store.get_status(file_hash) if self.status_store else None
+            if status and status.get("state") == "processed" and not force and not preview:
+                logger.info("Skipping already processed file %s (hash=%s)", fd.get("source"), file_hash)
+                return
+        except Exception:
+            logger.exception("Error checking status store for %s", fd.get("source"))
+
+        handler = None
+        start_ts = time.time()
+        pages_emitted = 0
+        bytes_processed = 0
+        try:
+            handler = self.choose_handler(fd)
+            logger.debug("Chosen handler %s for %s", handler.__class__.__name__, fd.get("source"))
+            try:
+                inspect_meta = handler.inspect(fd)
+            except Exception as e:
+                inspect_meta = {}
+                logger.exception("Handler.inspect failed for %s: %s", fd.get("source"), e)
+
+            extraction_engine = inspect_meta.get("engine") or handler.__class__.__name__
+
+            for page_dict in handler.extract(fd):
+                # guard: page_dict shape
+                page_number = page_dict.get("page_number", 1)
+                raw_text = page_dict.get("raw_text")
+                image_bytes = page_dict.get("image_bytes")
+                meta = page_dict.get("meta", {}) or {}
+
+                page_hash = self._page_hash(page_number, raw_text, image_bytes)
+                doc = document_template()
+                doc["id"] = self._make_document_id(fd, page_number)
+                doc["raw_text"] = raw_text
+                doc["image_bytes"] = image_bytes
+                metadata = doc["metadata"]
+                metadata.update({
+                    "source_path": str(fd.get("path") or fd.get("source")),
+                    "file_type": fd.get("ext") or fd.get("mime"),
+                    "page_number": page_number,
+                    "file_hash": file_hash,
+                    "page_hash": page_hash,
+                    "extraction_engine": extraction_engine,
+                    "ingested_at": int(time.time()),
+                })
+                # attach page-level meta
+                metadata.update(meta)
+
+                # If image and OCR desired, attempt OCR
+                if image_bytes is not None and ocr_enabled and self.ocr_client is not None:
+                    try:
+                        ocr_result = self.ocr_client.process(image_bytes, lang_hint=meta.get("lang"))
+                        if isinstance(ocr_result, dict):
+                            ocr_text = ocr_result.get("text")
+                            doc["raw_text"] = ocr_text or doc["raw_text"]
+                            metadata["ocr_engine"] = ocr_result.get("engine")
+                            metadata["ocr_confidence"] = ocr_result.get("confidence")
+                            metadata["ocr_meta"] = ocr_result.get("meta")
+                    except Exception:
+                        logger.exception("OCR failed for %s page %s", fd.get("source"), page_number)
+
+                # compute some counters
+                if raw_text is not None:
+                    bytes_processed += len(raw_text.encode("utf-8", errors="replace"))
+                elif image_bytes is not None:
+                    bytes_processed += len(image_bytes)
+
+                pages_emitted += 1
+                yield doc
+
+                # preview behaviour: early stop and do not mark processed
+                if preview and pages_emitted >= preview_limit:
+                    logger.debug("Preview stop after %s pages for %s", pages_emitted, fd.get("source"))
+                    return
+
+        except Exception as e:
+            logger.exception("Processing failed for %s: %s", fd.get("source"), e)
+            # mark failed if not preview
+            if not preview:
+                try:
+                    self.status_store.mark_failed(file_hash, {"error": str(e), "source": fd.get("source")})
+                except Exception:
+                    logger.exception("Failed to mark_failed for %s", fd.get("source"))
+            return
+        finally:
+            runtime = time.time() - start_ts
+            if not preview:
+                # record processed summary
+                try:
+                    summary = {"pages": pages_emitted, "bytes": bytes_processed, "runtime_seconds": runtime, "source": fd.get("source")}
+                    self.status_store.mark_processed(file_hash, summary)
+                except Exception:
+                    logger.exception("Failed to mark_processed for %s", fd.get("source"))
 
     def stream_documents(self, inputs: Union[str, Path, Iterable[Any], Any], *, preview: bool = False, ocr_enabled: bool = True, force: bool = False) -> Iterator[Dict[str, Any]]:
         """
@@ -818,9 +902,25 @@ class Loader:
 
         Keep this method thin so you can call it from CLI or tests.
         """
-        # TODO: iterate discover(inputs) and for each descriptor call process_file(fd)
-        # Emit high-level logs and metrics, but keep actual extraction in process_file
-        raise NotImplementedError("stream_documents must be implemented by developer")
+        files_seen = 0
+        total_pages = 0
+        total_bytes = 0
+        for fd in self.discover(inputs):
+            files_seen += 1
+            logger.info("Processing discovered file %s", fd.get("source"))
+            try:
+                for doc in self.process_file(fd, preview=preview, ocr_enabled=ocr_enabled, force=force):
+                    total_pages += 1
+                    # rough bytes: use metadata if present
+                    try:
+                        total_bytes += len(doc.get("raw_text", "") or b"") if isinstance(doc.get("raw_text"), (str, bytes)) else 0
+                    except Exception:
+                        pass
+                    yield doc
+            except Exception:
+                logger.exception("Error while streaming documents for %s", fd.get("source"))
+                continue
+        logger.info("stream_documents summary: files=%s pages=%s bytes_approx=%s", files_seen, total_pages, total_bytes)
 
     def preview(self, input_item: Union[str, Path, Any], n_pages: int = 2) -> List[Dict[str, Any]]:
         """
@@ -831,8 +931,22 @@ class Loader:
         - Call process_file(fd, preview=True) and collect up to n_pages documents
         - Return list of document dicts (do not persist status_store changes in preview mode)
         """
-        # TODO: implement by wiring discover() + process_file() with a preview flag
-        raise NotImplementedError("preview must be implemented")
+        docs = []
+        it = self.discover(input_item)
+        first_fd = None
+        for fd in it:
+            first_fd = fd
+            break
+        if first_fd is None:
+            return docs
+        try:
+            for doc in self.process_file(first_fd, preview=True, ocr_enabled=False, force=True, preview_limit=n_pages):
+                docs.append(doc)
+                if len(docs) >= n_pages:
+                    break
+        except Exception:
+            logger.exception("Preview failed for %s", first_fd.get("source"))
+        return docs
 
     def mark_processed(self, fd: Dict[str, Any], details: Dict[str, Any]):
         """
