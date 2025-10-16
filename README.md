@@ -27,17 +27,3 @@ rag-chatbot-docsearch ingests documents (e.g., PDFs, text files), converts them 
 - **Deployment:** Docker + Render (planned)
 
 ---
-
-## 🧭 Setup Instructions
-```bash
-git clone git@github.com:rzseq48/rag-chatbot-docsearch.git
-cd rag-chatbot-docsearch
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-Set up your environment variables in .env:
-OPENAI_API_KEY=your_key
-
-Run the FastAPI app:
-uvicorn app.main:app --reload

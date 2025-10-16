@@ -333,7 +333,6 @@ class TxtHandler(Handler):
         - If fd['path'] exists: open and yield a single page with raw_text = file content (or chunked).
         - If fd['file_like'] provided and path not set: read from file_like (seek to 0 if possible).
         """
-        # TODO: replace this simple example with your streaming/chunking policy.
         path = fd.get("path")
         filelike = fd.get("file_like")
         head = b""
@@ -547,6 +546,11 @@ class Loader:
         status_store: Optional[StatusStore] = None,
         ignore_patterns: Optional[Iterable[str]] = None,
         recursive: bool = RECURSIVE_BY_DEFAULT,
+        # optional storage adapters (additive; leave None to keep behaviour unchanged)
+        blob_store: Optional[Any] = None,        # expected API: put_blob(bucket, key, bytes) -> path/uri
+        doc_store: Optional[Any] = None,         # expected API: upsert_document(doc_dict)
+        vector_client: Optional[Any] = None,     # optional vector adapter (ChromaAdapter)
+        index_on_ingest: bool = False,           # whether to attempt indexing embeddings while ingesting
     ):
         """
         Setup loader state and handler registry.
@@ -558,6 +562,10 @@ class Loader:
         - status_store: store for processed file metadata
         - ignore_patterns: list of glob patterns to skip
         - recursive: whether to walk directories recursively
+        - blob_store: optional filesystem/S3-like blob store adapter
+        - doc_store: optional metadata store (sqlite wrapper) exposing upsert_document/get_document_by_id
+        - vector_client: optional vector adapter (e.g., ChromaAdapter)
+        - index_on_ingest: if True, attempts to index embeddings present in metadata on ingest
         """
         self.cache_dir = Path(cache_dir) if cache_dir is not None else None
         self.handlers = handlers or {}
@@ -571,6 +579,12 @@ class Loader:
         self.status_store = status_store or StatusStore(cache_dir=self.cache_dir)
         self.ignore_patterns = list(ignore_patterns) if ignore_patterns else IGNORE_PATTERNS_DEFAULT
         self.recursive = recursive
+
+        # optional storage wiring
+        self.blob_store = blob_store
+        self.doc_store = doc_store
+        self.vector_client = vector_client
+        self.index_on_ingest = index_on_ingest
 
     # -----------------------
     # discover (implemented)
@@ -865,6 +879,42 @@ class Loader:
                     bytes_processed += len(raw_text.encode("utf-8", errors="replace"))
                 elif image_bytes is not None:
                     bytes_processed += len(image_bytes)
+
+                # ------------- persist to storage (if provided) -------------
+                # Only persist when not previewing (preview should be read-only / dry-run).
+                if not preview:
+                    # Persist image bytes (blobs)
+                    if image_bytes is not None and getattr(self, "blob_store", None) is not None:
+                        try:
+                            # deterministic key: doc id plus extension
+                            blob_key = f"{doc['id']}.bin"
+                            # use file_hash as the bucket to group resources for a file
+                            blob_path = self.blob_store.put_blob(str(file_hash), blob_key, image_bytes)
+                            metadata["blob_path"] = blob_path
+                            metadata["blob_key"] = blob_key
+                        except Exception:
+                            logger.exception("Failed to persist blob for %s page %s", fd.get("source"), page_number)
+
+                    # Persist metadata document
+                    if getattr(self, "doc_store", None) is not None:
+                        try:
+                            # Upsert the full document (IDs, raw_text, metadata). Avoid storing large image bytes in sqlite.
+                            doc_to_store = dict(doc)
+                            # keep raw_text and metadata; strip image bytes to avoid DB bloat
+                            doc_to_store.pop("image_bytes", None)
+                            self.doc_store.upsert_document(doc_to_store)
+                        except Exception:
+                            logger.exception("Failed to persist document metadata for %s page %s", fd.get("source"), page_number)
+
+                    # Optional: index into vector DB (embedding must be provided by separate step)
+                    if getattr(self, "vector_client", None) is not None and getattr(self, "index_on_ingest", False):
+                        try:
+                            emb = metadata.get("embedding")
+                            if emb:
+                                # vector_client adapter should expose add_documents(ids, embeddings, metadatas, documents)
+                                self.vector_client.add_documents(ids=[doc["id"]], embeddings=[emb], metadatas=[metadata], documents=[doc.get("raw_text")])
+                        except Exception:
+                            logger.exception("Failed to index document %s on ingest", doc["id"])
 
                 pages_emitted += 1
                 yield doc
