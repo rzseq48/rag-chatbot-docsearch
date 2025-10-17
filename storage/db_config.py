@@ -86,6 +86,19 @@ def get_chroma_client(cfg: DBConfig):
 
     # try persistent storage dir under base_dir
     persist_dir = str(cfg.base_dir / "chroma")
+    # inside storage/db_config.py, before calling chromadb.Client(...)
+    try:
+        import chromadb
+        # defensive monkeypatch: harmless no-op to swallow unexpected telemetry calls
+        try:
+            chromadb.telemetry.capture = lambda *args, **kwargs: None
+        except Exception:
+            # some builds may not expose telemetry attribute; ignore
+            pass
+    except Exception:
+        raise ImportError("Requested chroma backend but chromadb is not installed. pip install chromadb")
+
+        
     try:
         # chromadb allows passing a persist_directory param on Client in common setups
         client = chromadb.Client(persist_directory=persist_dir)
