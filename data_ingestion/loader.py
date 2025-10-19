@@ -384,13 +384,55 @@ class PdfHandler(Handler):
     """
 
     def inspect(self, fd: Dict[str, Any]) -> Dict[str, Any]:
-        # TODO: use pypdf or fitz (PyMuPDF) to inspect PDF quickly
-        return {"page_count": None, "has_embedded_text": None}
+        """Inspect PDF file to get page count and text availability"""
+        try:
+            import pypdf
+            with open(fd['path'], 'rb') as file:
+                reader = pypdf.PdfReader(file)
+                page_count = len(reader.pages)
+                
+                # Check if pages have embedded text
+                has_embedded_text = any(
+                    len(page.extract_text().strip()) > 0 
+                    for page in reader.pages[:min(3, page_count)]  # Check first 3 pages
+                )
+                
+                return {
+                    "page_count": page_count,
+                    "has_embedded_text": has_embedded_text
+                }
+        except Exception as e:
+            logger.error(f"Error inspecting PDF {fd['path']}: {e}")
+            return {"page_count": None, "has_embedded_text": None}
 
     def extract(self, fd: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
-        # TODO: implement text-first extraction and yield page dicts
-        return
-        yield  # make it a generator (no-op)
+        """Extract text from PDF pages"""
+        try:
+            import pypdf
+            with open(fd['path'], 'rb') as file:
+                reader = pypdf.PdfReader(file)
+                
+                for page_num, page in enumerate(reader.pages):
+                    try:
+                        text = page.extract_text()
+                        if text.strip():
+                            yield {
+                                'content': text,
+                                'page_number': page_num + 1,
+                                'source': str(fd['path']),
+                                'content_type': 'text',
+                                'metadata': {
+                                    'file_path': str(fd['path']),
+                                    'page_number': page_num + 1,
+                                    'total_pages': len(reader.pages)
+                                }
+                            }
+                    except Exception as e:
+                        logger.warning(f"Error extracting text from page {page_num + 1}: {e}")
+                        continue
+        except Exception as e:
+            logger.error(f"Error extracting PDF {fd['path']}: {e}")
+            return
 
 
 class DocxHandler(Handler):
@@ -403,12 +445,81 @@ class DocxHandler(Handler):
     """
 
     def inspect(self, fd: Dict[str, Any]) -> Dict[str, Any]:
-        return {"page_count": None, "has_embedded_text": True}
+        """Inspect DOCX/PPTX file to get structure info"""
+        try:
+            ext = fd.get('ext', '').lower()
+            if ext == '.docx':
+                from docx import Document
+                doc = Document(fd['path'])
+                paragraph_count = len(doc.paragraphs)
+                return {
+                    "page_count": paragraph_count,  # Approximate
+                    "has_embedded_text": paragraph_count > 0
+                }
+            elif ext == '.pptx':
+                from pptx import Presentation
+                prs = Presentation(fd['path'])
+                slide_count = len(prs.slides)
+                return {
+                    "page_count": slide_count,
+                    "has_embedded_text": slide_count > 0
+                }
+            else:
+                return {"page_count": None, "has_embedded_text": None}
+        except Exception as e:
+            logger.error(f"Error inspecting office file {fd['path']}: {e}")
+            return {"page_count": None, "has_embedded_text": None}
 
     def extract(self, fd: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
-        # TODO: implement docx/pptx extraction
-        return
-        yield
+        """Extract text from DOCX/PPTX files"""
+        try:
+            ext = fd.get('ext', '').lower()
+            
+            if ext == '.docx':
+                from docx import Document
+                doc = Document(fd['path'])
+                
+                for para_num, paragraph in enumerate(doc.paragraphs):
+                    text = paragraph.text.strip()
+                    if text:
+                        yield {
+                            'content': text,
+                            'page_number': para_num + 1,
+                            'source': str(fd['path']),
+                            'content_type': 'text',
+                            'metadata': {
+                                'file_path': str(fd['path']),
+                                'paragraph_number': para_num + 1,
+                                'total_paragraphs': len(doc.paragraphs)
+                            }
+                        }
+            
+            elif ext == '.pptx':
+                from pptx import Presentation
+                prs = Presentation(fd['path'])
+                
+                for slide_num, slide in enumerate(prs.slides):
+                    slide_text = []
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text.strip():
+                            slide_text.append(shape.text.strip())
+                    
+                    if slide_text:
+                        yield {
+                            'content': '\n'.join(slide_text),
+                            'page_number': slide_num + 1,
+                            'source': str(fd['path']),
+                            'content_type': 'text',
+                            'metadata': {
+                                'file_path': str(fd['path']),
+                                'slide_number': slide_num + 1,
+                                'total_slides': len(prs.slides)
+                            }
+                        }
+            
+        except Exception as e:
+            logger.error(f"Error extracting office file {fd['path']}: {e}")
+            return
 
 
 class ImageHandler(Handler):
@@ -454,13 +565,129 @@ class ArchiveHandler(Handler):
     """
 
     def inspect(self, fd: Dict[str, Any]) -> Dict[str, Any]:
-        # TODO: implement archive inspection (list entries)
-        return {"page_count": None, "has_embedded_text": None}
+        """Inspect archive to get entry count"""
+        try:
+            import zipfile
+            import tarfile
+            
+            path = fd['path']
+            entry_count = 0
+            
+            if path.suffix.lower() == '.zip':
+                with zipfile.ZipFile(path, 'r') as zf:
+                    entry_count = len(zf.namelist())
+            elif path.suffix.lower() in ['.tar', '.gz'] or path.name.endswith('.tar.gz'):
+                with tarfile.open(path, 'r') as tf:
+                    entry_count = len(tf.getnames())
+            
+            return {
+                "page_count": entry_count,
+                "has_embedded_text": entry_count > 0
+            }
+        except Exception as e:
+            logger.error(f"Error inspecting archive {fd['path']}: {e}")
+            return {"page_count": None, "has_embedded_text": None}
 
     def extract(self, fd: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
-        # TODO: iterate entries, create nested file descriptors, and yield page extractions
-        return
-        yield
+        """Extract and process archive entries"""
+        try:
+            import zipfile
+            import tarfile
+            import tempfile
+            from pathlib import Path
+            
+            path = fd['path']
+            temp_dir = tempfile.mkdtemp(prefix="archive_extract_")
+            
+            try:
+                if path.suffix.lower() == '.zip':
+                    with zipfile.ZipFile(path, 'r') as zf:
+                        for entry_name in zf.namelist():
+                            if not entry_name.endswith('/'):  # Skip directories
+                                # Extract to temp file
+                                temp_path = Path(temp_dir) / entry_name
+                                temp_path.parent.mkdir(parents=True, exist_ok=True)
+                                
+                                with zf.open(entry_name) as source, open(temp_path, 'wb') as target:
+                                    target.write(source.read())
+                                
+                                # Create file descriptor for extracted file
+                                extracted_fd = {
+                                    'source': f"{path}::{entry_name}",
+                                    'path': temp_path,
+                                    'ext': Path(entry_name).suffix.lower(),
+                                    'size': temp_path.stat().st_size,
+                                    'mtime': temp_path.stat().st_mtime,
+                                    'notes': ['extracted_from_archive']
+                                }
+                                
+                                # Delegate to appropriate handler
+                                handler = self._get_handler_for_file(extracted_fd)
+                                if handler:
+                                    for result in handler.extract(extracted_fd):
+                                        # Update source path to include archive info
+                                        result['source'] = f"{path}::{entry_name}"
+                                        result['metadata'] = result.get('metadata', {})
+                                        result['metadata']['archive_path'] = str(path)
+                                        result['metadata']['archive_entry'] = entry_name
+                                        yield result
+                
+                elif path.suffix.lower() in ['.tar', '.gz'] or path.name.endswith('.tar.gz'):
+                    with tarfile.open(path, 'r') as tf:
+                        for member in tf.getmembers():
+                            if member.isfile():
+                                # Extract to temp file
+                                temp_path = Path(temp_dir) / member.name
+                                temp_path.parent.mkdir(parents=True, exist_ok=True)
+                                
+                                with tf.extractfile(member) as source, open(temp_path, 'wb') as target:
+                                    target.write(source.read())
+                                
+                                # Create file descriptor for extracted file
+                                extracted_fd = {
+                                    'source': f"{path}::{member.name}",
+                                    'path': temp_path,
+                                    'ext': Path(member.name).suffix.lower(),
+                                    'size': member.size,
+                                    'mtime': member.mtime,
+                                    'notes': ['extracted_from_archive']
+                                }
+                                
+                                # Delegate to appropriate handler
+                                handler = self._get_handler_for_file(extracted_fd)
+                                if handler:
+                                    for result in handler.extract(extracted_fd):
+                                        # Update source path to include archive info
+                                        result['source'] = f"{path}::{member.name}"
+                                        result['metadata'] = result.get('metadata', {})
+                                        result['metadata']['archive_path'] = str(path)
+                                        result['metadata']['archive_entry'] = member.name
+                                        yield result
+            
+            finally:
+                # Clean up temp directory
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                
+        except Exception as e:
+            logger.error(f"Error extracting archive {fd['path']}: {e}")
+            return
+    
+    def _get_handler_for_file(self, fd: Dict[str, Any]) -> Optional[Handler]:
+        """Get appropriate handler for extracted file"""
+        ext = fd.get('ext', '').lower()
+        
+        if ext in TEXT_EXTS:
+            return TxtHandler()
+        elif ext in PDF_EXTS:
+            return PdfHandler()
+        elif ext in DOCX_EXTS:
+            return DocxHandler()
+        elif ext in IMAGE_EXTS:
+            return ImageHandler()
+        else:
+            logger.warning(f"No handler for file type: {ext}")
+            return None
 
 
 # ---------------------------
@@ -482,9 +709,82 @@ class OcrClient:
         self.config = config or {}
 
     def process(self, image_bytes: bytes, lang_hint: Optional[str] = None) -> Dict[str, Any]:
-        # TODO: integrate with pytesseract or cloud APIs
-        # For now, raise to indicate not implemented
-        raise NotImplementedError("OCR client not implemented")
+        """Process image bytes with OCR"""
+        try:
+            if self.provider == "local":
+                return self._process_local(image_bytes, lang_hint)
+            elif self.provider == "cloud":
+                return self._process_cloud(image_bytes, lang_hint)
+            else:
+                raise ValueError(f"Unknown OCR provider: {self.provider}")
+        except Exception as e:
+            logger.error(f"Error processing OCR: {e}")
+            return {
+                "text": "",
+                "boxes": [],
+                "confidence": 0.0,
+                "engine": "error",
+                "meta": {"error": str(e)}
+            }
+    
+    def _process_local(self, image_bytes: bytes, lang_hint: Optional[str] = None) -> Dict[str, Any]:
+        """Process with local Tesseract OCR"""
+        try:
+            import pytesseract
+            from PIL import Image
+            import io
+            
+            # Convert bytes to PIL Image
+            image = Image.open(io.BytesIO(image_bytes))
+            
+            # Configure Tesseract
+            config = '--oem 3 --psm 6'
+            if lang_hint:
+                config += f' -l {lang_hint}'
+            
+            # Extract text
+            text = pytesseract.image_to_string(image, config=config)
+            
+            # Get confidence data
+            try:
+                data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+                confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
+                avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+            except:
+                avg_confidence = 0.0
+            
+            return {
+                "text": text.strip(),
+                "boxes": [],  # Could be implemented with pytesseract.image_to_boxes
+                "confidence": avg_confidence / 100.0,  # Normalize to 0-1
+                "engine": "tesseract",
+                "meta": {
+                    "provider": "local",
+                    "language_hint": lang_hint,
+                    "image_size": image.size
+                }
+            }
+        except ImportError:
+            logger.error("pytesseract not installed. Install with: pip install pytesseract")
+            return {
+                "text": "",
+                "boxes": [],
+                "confidence": 0.0,
+                "engine": "tesseract",
+                "meta": {"error": "pytesseract not installed"}
+            }
+    
+    def _process_cloud(self, image_bytes: bytes, lang_hint: Optional[str] = None) -> Dict[str, Any]:
+        """Process with cloud OCR service (placeholder)"""
+        # This would integrate with Google Cloud Vision, AWS Textract, etc.
+        logger.warning("Cloud OCR not implemented yet")
+        return {
+            "text": "",
+            "boxes": [],
+            "confidence": 0.0,
+            "engine": "cloud",
+            "meta": {"error": "Cloud OCR not implemented"}
+        }
 
 
 # ---------------------------
