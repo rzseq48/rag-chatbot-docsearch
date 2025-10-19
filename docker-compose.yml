@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  rag-chatbot:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - STORAGE_DIR=/app/storage
+      - VECTOR_BACKEND=chroma
+      - EMBEDDER_TYPE=mock
+      - LLM_PROVIDER=mock
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./storage:/app/storage
+      - ./data:/app/data  # Mount data directory for document ingestion
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add Redis for caching (future enhancement)
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+
+# volumes:
+#   redis_data:

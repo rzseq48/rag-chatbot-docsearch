@@ -1,0 +1,178 @@
+"""
+LLM provider for RAG chatbot
+"""
+import os
+import logging
+from typing import List, Dict, Any, Optional
+from abc import ABC, abstractmethod
+
+logger = logging.getLogger(__name__)
+
+class LLMProvider(ABC):
+    """Abstract base class for LLM providers"""
+    
+    @abstractmethod
+    def generate_response(self, prompt: str, context: Optional[str] = None) -> str:
+        """Generate response from LLM"""
+        pass
+    
+    @abstractmethod
+    def generate_response_with_context(self, query: str, context_documents: List[str]) -> str:
+        """Generate response using retrieved context"""
+        pass
+
+class MockLLMProvider(LLMProvider):
+    """
+    Mock LLM provider for testing
+    In production, replace with actual LLM (OpenAI, Anthropic, etc.)
+    """
+    
+    def __init__(self):
+        logger.info("Initialized MockLLMProvider")
+    
+    def generate_response(self, prompt: str, context: Optional[str] = None) -> str:
+        """Generate mock response"""
+        if context:
+            return f"Based on the context provided, here's a response to: {prompt}\n\nContext: {context[:100]}..."
+        return f"Mock response to: {prompt}"
+    
+    def generate_response_with_context(self, query: str, context_documents: List[str]) -> str:
+        """Generate response using context documents"""
+        context_summary = " ".join([doc[:50] + "..." for doc in context_documents[:3]])
+        return f"Based on the retrieved documents, here's what I found about '{query}':\n\n{context_summary}"
+
+class OpenAILLMProvider(LLMProvider):
+    """
+    OpenAI LLM provider
+    Requires OPENAI_API_KEY environment variable
+    """
+    
+    def __init__(self, model: str = "gpt-3.5-turbo"):
+        self.model = model
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is required")
+        
+        try:
+            import openai
+            self.client = openai.OpenAI(api_key=self.api_key)
+        except ImportError:
+            raise ImportError("openai package is required for OpenAILLMProvider")
+        
+        logger.info(f"Initialized OpenAILLMProvider with model {model}")
+    
+    def generate_response(self, prompt: str, context: Optional[str] = None) -> str:
+        """Generate response using OpenAI API"""
+        try:
+            messages = []
+            if context:
+                messages.append({
+                    "role": "system",
+                    "content": f"Use the following context to answer the question: {context}"
+                })
+            
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=1000,
+                temperature=0.7
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            raise
+    
+    def generate_response_with_context(self, query: str, context_documents: List[str]) -> str:
+        """Generate response using context documents"""
+        context = "\n\n".join(context_documents)
+        return self.generate_response(query, context)
+
+class AnthropicLLMProvider(LLMProvider):
+    """
+    Anthropic Claude LLM provider
+    Requires ANTHROPIC_API_KEY environment variable
+    """
+    
+    def __init__(self, model: str = "claude-3-sonnet-20240229"):
+        self.model = model
+        self.api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+        
+        try:
+            import anthropic
+            self.client = anthropic.Anthropic(api_key=self.api_key)
+        except ImportError:
+            raise ImportError("anthropic package is required for AnthropicLLMProvider")
+        
+        logger.info(f"Initialized AnthropicLLMProvider with model {model}")
+    
+    def generate_response(self, prompt: str, context: Optional[str] = None) -> str:
+        """Generate response using Anthropic API"""
+        try:
+            system_prompt = ""
+            if context:
+                system_prompt = f"Use the following context to answer the question: {context}"
+            
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=1000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            return response.content[0].text
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            raise
+    
+    def generate_response_with_context(self, query: str, context_documents: List[str]) -> str:
+        """Generate response using context documents"""
+        context = "\n\n".join(context_documents)
+        return self.generate_response(query, context)
+
+def get_llm_provider(provider_type: str = "mock", **kwargs) -> LLMProvider:
+    """
+    Factory function to get appropriate LLM provider
+    
+    Args:
+        provider_type: Type of provider ("mock", "openai", "anthropic")
+        **kwargs: Additional arguments for provider initialization
+    
+    Returns:
+        LLMProvider instance
+    """
+    if provider_type == "mock":
+        return MockLLMProvider(**kwargs)
+    elif provider_type == "openai":
+        return OpenAILLMProvider(**kwargs)
+    elif provider_type == "anthropic":
+        return AnthropicLLMProvider(**kwargs)
+    else:
+        raise ValueError(f"Unknown LLM provider type: {provider_type}")
+
+# Example usage
+if __name__ == "__main__":
+    # Test the LLM providers
+    llm = get_llm_provider("mock")
+    
+    # Test basic response
+    response = llm.generate_response("What is artificial intelligence?")
+    print(f"Basic response: {response}")
+    
+    # Test response with context
+    context_docs = [
+        "AI is a field of computer science focused on creating intelligent machines.",
+        "Machine learning is a subset of AI that enables computers to learn without explicit programming."
+    ]
+    response_with_context = llm.generate_response_with_context(
+        "What is the relationship between AI and machine learning?", 
+        context_docs
+    )
+    print(f"Response with context: {response_with_context}")
