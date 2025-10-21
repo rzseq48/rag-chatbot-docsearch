@@ -137,12 +137,66 @@ class AnthropicLLMProvider(LLMProvider):
         context = "\n\n".join(context_documents)
         return self.generate_response(query, context)
 
+class GroqLLMProvider(LLMProvider):
+    """
+    Groq LLM provider for fast inference
+    Requires GROQ_API_KEY environment variable
+    """
+    
+    def __init__(self, model: str = "llama3-8b-8192"):
+        self.model = model
+        self.api_key = os.getenv("GROQ_API_KEY")
+        if not self.api_key:
+            raise ValueError("GROQ_API_KEY environment variable is required")
+        
+        try:
+            from groq import Groq
+            self.client = Groq(api_key=self.api_key)
+        except ImportError:
+            raise ImportError("groq package is required for GroqLLMProvider. Install with: pip install groq")
+        
+        logger.info(f"Initialized GroqLLMProvider with model {model}")
+    
+    def generate_response(self, prompt: str, context: Optional[str] = None) -> str:
+        """Generate response using Groq API"""
+        try:
+            messages = []
+            if context:
+                messages.append({
+                    "role": "system",
+                    "content": f"Use the following context to answer the question: {context}"
+                })
+            
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=1000,
+                temperature=0.7,
+                top_p=1,
+                stream=False
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            raise
+    
+    def generate_response_with_context(self, query: str, context_documents: List[str]) -> str:
+        """Generate response using context documents"""
+        context = "\n\n".join(context_documents)
+        return self.generate_response(query, context)
+
 def get_llm_provider(provider_type: str = "mock", **kwargs) -> LLMProvider:
     """
     Factory function to get appropriate LLM provider
     
     Args:
-        provider_type: Type of provider ("mock", "openai", "anthropic")
+        provider_type: Type of provider ("mock", "openai", "anthropic", "groq")
         **kwargs: Additional arguments for provider initialization
     
     Returns:
@@ -154,6 +208,8 @@ def get_llm_provider(provider_type: str = "mock", **kwargs) -> LLMProvider:
         return OpenAILLMProvider(**kwargs)
     elif provider_type == "anthropic":
         return AnthropicLLMProvider(**kwargs)
+    elif provider_type == "groq":
+        return GroqLLMProvider(**kwargs)
     else:
         raise ValueError(f"Unknown LLM provider type: {provider_type}")
 

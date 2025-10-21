@@ -7,7 +7,7 @@ A complete AI-powered document retrieval and question-answering system built wit
 - **Multi-format Document Support**: PDF, DOCX, PPTX, TXT, images, and archives
 - **Intelligent Text Extraction**: OCR support for images and scanned documents
 - **Vector Search**: ChromaDB-powered semantic search
-- **Multiple LLM Providers**: OpenAI, Anthropic, or mock providers
+- **Multiple LLM Providers**: OpenAI, Anthropic, Groq, or mock providers
 - **RESTful API**: Complete FastAPI application with Swagger docs
 - **Docker Support**: Ready for production deployment
 - **Comprehensive Testing**: Full test suite included
@@ -38,7 +38,7 @@ A complete AI-powered document retrieval and question-answering system built wit
 - **Backend**: FastAPI + Uvicorn
 - **Vector Store**: ChromaDB
 - **Embeddings**: OpenAI, Sentence-BERT, or Mock
-- **LLM**: OpenAI GPT, Anthropic Claude, or Mock
+- **LLM**: OpenAI GPT, Anthropic Claude, Groq (fast inference), or Mock
 - **Document Processing**: PyPDF, python-docx, python-pptx, Tesseract OCR
 - **Storage**: SQLite + ChromaDB
 - **Deployment**: Docker + Docker Compose
@@ -129,7 +129,7 @@ from rag_pipeline import RAGPipeline
 rag = RAGPipeline(
     storage_dir="./storage",
     embedder_type="mock",  # or "openai", "sentence_bert"
-    llm_provider="mock"    # or "openai", "anthropic"
+    llm_provider="mock"    # or "openai", "anthropic", "groq"
 )
 
 # Ingest documents
