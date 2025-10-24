@@ -5,7 +5,7 @@ A complete AI-powered document retrieval and question-answering system built wit
 ## ✨ Key Features
 
 - **🔍 Multi-Format Document Support**: PDF, DOCX, PPTX, TXT, images, and archives with intelligent text extraction
-- **🤖 Multiple LLM Providers**: OpenAI GPT, Anthropic Claude, Groq (fast inference), or mock providers for testing
+- **🤖 Multiple LLM Providers**: OpenAI GPT, Anthropic Claude, Groq (ultra-fast inference), or mock providers for testing
 - **🧮 Advanced Embeddings**: OpenAI, Sentence-BERT, or mock embedding providers
 - **📊 Vector Search**: ChromaDB-powered semantic search with similarity scoring
 - **🔧 OCR Support**: Tesseract integration for scanned documents and images
@@ -69,7 +69,7 @@ LLM_PROVIDER=openai
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 LLM_PROVIDER=anthropic
 
-# For Groq (fast inference)
+# For Groq (ultra-fast inference)
 GROQ_API_KEY=your_groq_api_key_here
 LLM_PROVIDER=groq
 
@@ -110,7 +110,7 @@ from rag_pipeline import RAGPipeline
 rag = RAGPipeline(
     storage_dir="./storage",
     embedder_type="openai",  # or "mock", "sentence_bert"
-    llm_provider="openai"    # or "mock", "anthropic", "groq"
+    llm_provider="groq"      # or "mock", "openai", "anthropic"
 )
 
 # Ingest documents
@@ -180,6 +180,7 @@ curl http://localhost:8000/health
 | `VECTOR_BACKEND` | `chroma` | Vector database backend |
 | `EMBEDDER_TYPE` | `mock` | Embedding provider (`mock`, `openai`, `sentence_bert`) |
 | `LLM_PROVIDER` | `mock` | LLM provider (`mock`, `openai`, `anthropic`, `groq`) |
+| `GROQ_API_KEY` | - | Groq API key for ultra-fast inference |
 | `CHUNK_SIZE` | `1000` | Document chunk size |
 | `CHUNK_OVERLAP` | `200` | Chunk overlap |
 | `API_HOST` | `0.0.0.0` | API server host |

@@ -139,57 +139,154 @@ class AnthropicLLMProvider(LLMProvider):
 
 class GroqLLMProvider(LLMProvider):
     """
-    Groq LLM provider for fast inference
+    Groq LLM provider for ultra-fast inference
+    
+    Groq provides 10-100x faster inference than traditional cloud APIs by using
+    specialized hardware optimized for large language models.
+    
+    Features:
+    - Ultra-fast inference (sub-second response times)
+    - Multiple model options (Llama, Mixtral, Gemma)
+    - Cost-effective pricing
+    - Global edge locations for low latency
+    
+    Available Models:
+    - llama3-8b-8192: Fast, efficient, good for most tasks
+    - llama3-70b-8192: More capable, better reasoning
+    - mixtral-8x7b-32768: Excellent for complex reasoning
+    - gemma2-9b-it: Google's efficient model
+    - gemma2-27b-it: Larger Google model
+    
     Requires GROQ_API_KEY environment variable
+    Get your API key from: https://console.groq.com/
     """
     
     def __init__(self, model: str = "llama3-8b-8192"):
         self.model = model
         self.api_key = os.getenv("GROQ_API_KEY")
         if not self.api_key:
-            raise ValueError("GROQ_API_KEY environment variable is required")
+            raise ValueError(
+                "GROQ_API_KEY environment variable is required. "
+                "Get your API key from: https://console.groq.com/"
+            )
         
         try:
             from groq import Groq
             self.client = Groq(api_key=self.api_key)
         except ImportError:
-            raise ImportError("groq package is required for GroqLLMProvider. Install with: pip install groq")
+            raise ImportError(
+                "groq package is required for GroqLLMProvider. "
+                "Install with: pip install groq"
+            )
         
+        # Validate model availability
+        self._validate_model()
         logger.info(f"Initialized GroqLLMProvider with model {model}")
     
+    def _validate_model(self):
+        """Validate that the model is available"""
+        available_models = [
+            "llama3-8b-8192",
+            "llama3-70b-8192", 
+            "mixtral-8x7b-32768",
+            "gemma2-9b-it",
+            "gemma2-27b-it"
+        ]
+        
+        if self.model not in available_models:
+            logger.warning(
+                f"Model {self.model} may not be available. "
+                f"Available models: {', '.join(available_models)}"
+            )
+    
     def generate_response(self, prompt: str, context: Optional[str] = None) -> str:
-        """Generate response using Groq API"""
+        """
+        Generate response using Groq API with ultra-fast inference
+        
+        Args:
+            prompt: User prompt/question
+            context: Optional context to include in the response
+            
+        Returns:
+            Generated response from Groq
+            
+        Raises:
+            Exception: If API call fails
+        """
         try:
             messages = []
+            
+            # Add system context if provided
             if context:
                 messages.append({
                     "role": "system",
-                    "content": f"Use the following context to answer the question: {context}"
+                    "content": f"Use the following context to answer the question accurately: {context}"
                 })
             
+            # Add user prompt
             messages.append({
                 "role": "user",
                 "content": prompt
             })
             
+            # Make API call with optimized parameters for speed
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 max_tokens=1000,
-                temperature=0.7,
-                top_p=1,
-                stream=False
+                temperature=0.7,  # Balanced creativity and consistency
+                top_p=1,          # Use full vocabulary
+                stream=False,     # Get complete response
+                stop=None         # No stop sequences
             )
             
             return response.choices[0].message.content
+            
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            raise
+            logger.error(f"Groq API error: {e}")
+            # Provide helpful error messages
+            if "rate limit" in str(e).lower():
+                raise Exception("Groq rate limit exceeded. Please try again later.")
+            elif "invalid api key" in str(e).lower():
+                raise Exception("Invalid Groq API key. Check your GROQ_API_KEY environment variable.")
+            elif "model not found" in str(e).lower():
+                raise Exception(f"Model {self.model} not available. Try a different model.")
+            else:
+                raise Exception(f"Groq API error: {e}")
     
     def generate_response_with_context(self, query: str, context_documents: List[str]) -> str:
         """Generate response using context documents"""
         context = "\n\n".join(context_documents)
         return self.generate_response(query, context)
+    
+    def get_available_models(self) -> List[str]:
+        """Get list of available Groq models"""
+        return [
+            "llama3-8b-8192",
+            "llama3-70b-8192", 
+            "mixtral-8x7b-32768",
+            "gemma2-9b-it",
+            "gemma2-27b-it"
+        ]
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get information about the current model"""
+        return {
+            "provider": "groq",
+            "model": self.model,
+            "features": [
+                "ultra-fast inference",
+                "cost-effective",
+                "global edge locations",
+                "multiple model options"
+            ],
+            "speed": "10-100x faster than traditional APIs",
+            "use_cases": [
+                "real-time applications",
+                "high-volume processing",
+                "cost-sensitive deployments"
+            ]
+        }
 
 def get_llm_provider(provider_type: str = "mock", **kwargs) -> LLMProvider:
     """
