@@ -87,8 +87,6 @@ def add_sample_documents(adapter):
 
 def query_documents(adapter, query_embedding):
     """Query ChromaDB for similar documents"""
-    
-    print("Querying for similar documents...")
     results = adapter.query(query_embedding=query_embedding, n_results=3)
     
     print("Query results:")
