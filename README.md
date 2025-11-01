@@ -389,7 +389,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 - [ChromaDB Setup Guide](CHROMADB_SETUP.md) - Detailed ChromaDB configuration
 - [Project Completion Status](PROJECT_COMPLETION.md) - Implementation details
-- [Issues and Fixes](ISSUES_AND_FIXES.md) - Known issues and solutions
+
 
 ## 📄 License
 
