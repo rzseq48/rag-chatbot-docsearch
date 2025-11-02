@@ -160,4 +160,3 @@ def extract(self, fd: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
 - Add Docker configuration
 - Add proper documentation
 
-The project is now in a much better state with working core components, but still needs completion of the data ingestion pipeline and full RAG integration.
