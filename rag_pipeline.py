@@ -323,4 +323,4 @@ if __name__ == "__main__":
     
     # Get collection info
     info = rag.get_collection_info()
-    print(f"Collection info: {info}")
+    
