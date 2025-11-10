@@ -408,6 +408,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🎉 Acknowledgments
 
 - Built with [FastAPI](https://fastapi.tiangolo.com/) for the API
-- Powered by [ChromaDB](https://www.trychroma.com/) for vector storage
 - Uses [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for document processing
 - Supports multiple LLM providers for flexibility
