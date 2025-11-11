@@ -409,4 +409,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Built with [FastAPI](https://fastapi.tiangolo.com/) for the API
 - Uses [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for document processing
-- Supports multiple LLM providers for flexibility
